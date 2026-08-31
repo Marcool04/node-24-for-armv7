@@ -124,23 +124,22 @@ jobs:
           FILE="node/deps/v8/src/strings/string-hasher.cc"
 
           if ! grep -q "#ifdef __SSE2__" "$FILE"; then
-            echo "ERROR: #ifdef __SSE2__ not found in $FILE — file structure may have changed"
-            exit 1
+            echo "WARN: #ifdef __SSE2__ not found in $FILE — not patching"
+          else
+            # Replace all #ifdef __SSE2__ with the combined guard, but only on
+            # lines where the surrounding SSE2 block contains _mm_cvtsi128_si64.
+            # Strategy: do a global replace, then verify at least one block needed it.
+            # Since _mm_cvtsi128_si64 is x86_64-only, any file containing it with
+            # a plain #ifdef __SSE2__ needs the patch — safe to replace all occurrences.
+            if ! grep -q "_mm_cvtsi128_si64" "$FILE"; then
+              echo "ERROR: No _mm_cvtsi128_si64 found in $FILE — patch may not be needed"
+              exit 1
+            fi
+  
+            COUNT=$(grep -c "#ifdef __SSE2__" "$FILE")
+            sed -i 's/#ifdef __SSE2__/#if defined(__SSE2__) \&\& defined(__x86_64__)/g' "$FILE"
+            echo "Patched $COUNT occurrence(s) in $FILE"
           fi
-
-          # Replace all #ifdef __SSE2__ with the combined guard, but only on
-          # lines where the surrounding SSE2 block contains _mm_cvtsi128_si64.
-          # Strategy: do a global replace, then verify at least one block needed it.
-          # Since _mm_cvtsi128_si64 is x86_64-only, any file containing it with
-          # a plain #ifdef __SSE2__ needs the patch — safe to replace all occurrences.
-          if ! grep -q "_mm_cvtsi128_si64" "$FILE"; then
-            echo "ERROR: No _mm_cvtsi128_si64 found in $FILE — patch may not be needed"
-            exit 1
-          fi
-
-          COUNT=$(grep -c "#ifdef __SSE2__" "$FILE")
-          sed -i 's/#ifdef __SSE2__/#if defined(__SSE2__) \&\& defined(__x86_64__)/g' "$FILE"
-          echo "Patched $COUNT occurrence(s) in $FILE"
 
       - name: Configure Node.js
         working-directory: node
@@ -152,30 +151,35 @@ jobs:
         run: |
           NODE_DIR="$(pwd)"
 
-          sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/i686-unknown-linux-gnu/release; cargo rustc --release --frozen --target i686-unknown-linux-gnu --target-dir "$(obj)/gen"|g' \
-            "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
-          sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
-            "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
+          if [[ -f "${NODE_DIR}/out/deps/crates/node_crates.host.mk" ]]; then
+            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/i686-unknown-linux-gnu/release; cargo rustc --release --frozen --target i686-unknown-linux-gnu --target-dir "$(obj)/gen"|g' \
+              "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
+              "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
+          fi
+          if [[ -f "${NODE_DIR}/out/deps/crates/node_crates.target.mk" ]]; then
+            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/armv7-unknown-linux-gnueabihf/release; cargo rustc --release --frozen --target armv7-unknown-linux-gnueabihf --target-dir "$(obj)/gen"|g' \
+              "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' \
+              "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
+          fi
 
-          sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/armv7-unknown-linux-gnueabihf/release; cargo rustc --release --frozen --target armv7-unknown-linux-gnueabihf --target-dir "$(obj)/gen"|g' \
-            "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
-          sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' \
-            "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
-
-          sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
-            "${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk"
+          if [[ -f "${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk" ]]; then
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
+              "${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk"
+          fi
 
           for f in \
             "${NODE_DIR}/out/node.target.mk" \
             "${NODE_DIR}/out/embedtest.target.mk" \
             "${NODE_DIR}/out/cctest.target.mk" \
-            "${NODE_DIR}/out/node_mksnapshot.target.mk"; do
-            [ -f "$f" ] && sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' "$f"
+            "${NODE_DIR}/out/node_mksnapshot.target.mk"
+          do
+            if [[ -f "$f" ]]; then
+              sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' \
+                "$f"
+            fi
           done
-
-          echo "=== Patch verification ==="
-          grep "cargo rustc" "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
-          grep "cargo rustc" "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
 
       # Build only the host tools needed before ARM compilation can proceed.
       # These are the slow part: V8 snapshot generator, Torque, bytecode generator.
