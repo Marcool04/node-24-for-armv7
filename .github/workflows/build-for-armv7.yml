@@ -141,6 +141,16 @@ jobs:
             echo "Patched $COUNT occurrence(s) in $FILE"
           fi
 
+      - name: Patch V8 int64-lowering Tuple template disambiguation (v24.x)
+        run: |
+          FILE="node/deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h"
+          if [ -f "$FILE" ] && grep -q "__ Tuple<" "$FILE"; then
+            sed -i 's/__ Tuple</__ template Tuple</g' "$FILE"
+            echo "Patched Tuple template disambiguation in $FILE"
+          else
+            echo "No unfixed '__ Tuple<' occurrences in $FILE, skipping (v26.x already upstream-fixed)"
+          fi
+
       - name: Configure Node.js
         working-directory: node
         run: |
