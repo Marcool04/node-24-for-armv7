@@ -476,10 +476,10 @@ jobs:
           echo "=== bin ==="
           ls -la "$RELEASE_DIR/v${NODE_VERSION}/bin/"
 
-          mkdir -p "$NODE_DIR/release-artifacts"
-          cd "$RELEASE_DIR"
+          mkdir -p "$GITHUB_WORKSPACE/release-artifacts"
+          echo "Now compressing \"$RELEASE_DIR/v${NODE_VERSION}/\" into \"$GITHUB_WORKSPACE/release-artifacts/$RELEASE_NAME.tar.gz\""
           tar -czf "$GITHUB_WORKSPACE/release-artifacts/$RELEASE_NAME.tar.gz" \
-            "v${NODE_VERSION}/"
+            "$RELEASE_DIR/v${NODE_VERSION}/"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         env:
@@ -487,5 +487,7 @@ jobs:
         with:
           tag_name: v${{ needs.build-host-tools.outputs.node_version }}-armv7l
           name: "Node v${{ needs.build-host-tools.outputs.node_version }} - armv7l"
+          # Not that this is relative to $GITHUB_WORKSPACE which is 
+          # where we created the release-artifacts
           files: release-artifacts/node-v${{ needs.build-host-tools.outputs.node_version }}-linux-armv7l.tar.gz
 
