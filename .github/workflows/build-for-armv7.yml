@@ -13,6 +13,7 @@ on:
 
 env:
   NODE_BRANCH: v26.x
+  NODE_DIR: ${{ github.workspace }}/node
 
 jobs:
   # ============================================================
@@ -120,8 +121,9 @@ jobs:
           echo "NODE_DIR=$(pwd)" >> $GITHUB_ENV
 
       - name: Patch string-hasher for 32-bit host build
+        working-directory: ${{ env.NODE_DIR }}
         run: |
-          FILE="node/deps/v8/src/strings/string-hasher.cc"
+          FILE="deps/v8/src/strings/string-hasher.cc"
 
           if ! grep -q "#ifdef __SSE2__" "$FILE"; then
             echo "WARN: #ifdef __SSE2__ not found in $FILE — not patching"
@@ -142,8 +144,9 @@ jobs:
           fi
 
       - name: Patch V8 int64-lowering Tuple template disambiguation (v24.x)
+        working-directory: ${{ env.NODE_DIR }}
         run: |
-          FILE="node/deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h"
+          FILE="deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h"
           if [ -f "$FILE" ] && grep -q "__ Tuple<" "$FILE"; then
             sed -i 's/__ Tuple</__ template Tuple</g' "$FILE"
             echo "Patched Tuple template disambiguation in $FILE"
@@ -152,31 +155,26 @@ jobs:
           fi
 
       - name: Configure Node.js
-        working-directory: node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           ./configure --dest-cpu arm --partly-static
 
       - name: Patch node_crates mk files
-        working-directory: node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
-          NODE_DIR="$(pwd)"
-
-          if [[ -f "${NODE_DIR}/out/deps/crates/node_crates.host.mk" ]]; then
-            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/i686-unknown-linux-gnu/release; cargo rustc --release --frozen --target i686-unknown-linux-gnu --target-dir "$(obj)/gen"|g' \
-              "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
-            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
-              "${NODE_DIR}/out/deps/crates/node_crates.host.mk"
+          node_crates_host_file="${NODE_DIR}/out/deps/crates/node_crates.host.mk"
+          if [[ -f "$node_crates_host_file" ]]; then
+            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/i686-unknown-linux-gnu/release; cargo rustc --release --frozen --target i686-unknown-linux-gnu --target-dir "$(obj)/gen"|g' "$node_crates_host_file"
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' "$node_crates_host_file"
           fi
-          if [[ -f "${NODE_DIR}/out/deps/crates/node_crates.target.mk" ]]; then
-            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/armv7-unknown-linux-gnueabihf/release; cargo rustc --release --frozen --target armv7-unknown-linux-gnueabihf --target-dir "$(obj)/gen"|g' \
-              "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
-            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' \
-              "${NODE_DIR}/out/deps/crates/node_crates.target.mk"
+          node_crates_target_file="${NODE_DIR}/out/deps/crates/node_crates.target.mk"
+          if [[ -f "$node_crates_target_file" ]]; then
+            sed -i 's|mkdir -p $(obj)/gen//release; cargo rustc --release --frozen --target-dir "$(obj)/gen"|mkdir -p $(obj)/gen/armv7-unknown-linux-gnueabihf/release; cargo rustc --release --frozen --target armv7-unknown-linux-gnueabihf --target-dir "$(obj)/gen"|g' "$node_crates_target_file"
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/armv7-unknown-linux-gnueabihf/release/libnode_crates.a|g' "$node_crates_target_file"
           fi
-
-          if [[ -f "${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk" ]]; then
-            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' \
-              "${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk"
+          mksnapshot_file="${NODE_DIR}/out/tools/v8_gypfiles/mksnapshot.host.mk"
+          if [[ -f "$mksnapshot_file" ]]; then
+            sed -i 's|$(obj)/gen//release/libnode_crates.a|$(obj)/gen/i686-unknown-linux-gnu/release/libnode_crates.a|g' "$mksnapshot_file"
           fi
 
           for f in \
@@ -195,7 +193,7 @@ jobs:
       # These are the slow part: V8 snapshot generator, Torque, bytecode generator.
       # GYP generates a top-level Makefile that accepts target names directly.
       - name: Build host tools only
-        working-directory: node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           # List available make targets to find the right names
           echo "=== Available top-level make targets ==="
@@ -219,7 +217,7 @@ jobs:
       # Save the entire source + build tree so Job 2 can continue
       # We exclude heavy intermediate objects that job 2 will rebuild anyway
       - name: Compress build tree for handoff
-        working-directory: node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           tar --exclude='out/Release/obj/gen/armv7*' \
               --exclude='out/Release/obj.target' \
@@ -282,14 +280,15 @@ jobs:
 
       - name: Restore build tree
         run: |
-          mkdir -p /home/runner/work/node/node/node
-          tar -xzf /tmp/node-host-build.tar.gz             -C /home/runner/work/node/node/node
-          ls /home/runner/work/node/node/node/out/Release/ | head -20
+          mkdir -p "$NODE_DIR"
+          tar -xzf /tmp/node-host-build.tar.gz -C "$NODE_DIR"
+          echo "=== Restored build tree (target 1) from node-host-build.tar.gz ==="
+          ls "$NODE_DIR/out/Release/" | head -20
 
           # Touch all source files to epoch so they appear OLDER than
           # compiled objects — make will correctly skip already-built targets.
           echo "=== Setting source timestamps older than objects ==="
-          find /home/runner/work/node/node/node             -not -path "*/out/*"             -type f             -exec touch -t 197001010000 {} +
+          find "$NODE_DIR" -not -path "*/out/*" -type f -exec touch -t 197001010000 {} +
           echo "Done setting timestamps"
 
       - name: Configure cross-compilation environment
@@ -312,7 +311,7 @@ jobs:
       # make is smart enough to see host tools already exist and skip them,
       # then proceed to build ARM target objects and link the final binary
       - name: Build ARM target part 1 (5h timeout)
-        working-directory: /home/runner/work/node/node/node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           # Run make for up to 5 hours then stop gracefully.
           # The partial build tree is saved so job 3 can continue.
@@ -321,11 +320,11 @@ jobs:
           ls -lh out/Release/ | head -20
 
       - name: Compress partial build tree for handoff
-        working-directory: /home/runner/work/node/node/node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           # Include everything - obj.host, .deps all needed for make to
           # correctly continue without recompiling anything from scratch.
-          tar -czf /tmp/node-target-partial.tar.gz               . 2>&1 | tail -5
+          tar -czf /tmp/node-target-partial.tar.gz . 2>&1 | tail -5
           ls -lh /tmp/node-target-partial.tar.gz
 
       - name: Upload partial build artifact
@@ -380,18 +379,18 @@ jobs:
 
       - name: Restore partial build tree
         run: |
-          mkdir -p /home/runner/work/node/node/node
+          mkdir -p "$NODE_DIR"
           # --touch sets extracted file timestamps to extraction time,
           # which is newer than source files — make will see objects as
           # up-to-date and skip recompilation correctly.
-          tar -xzf /tmp/node-target-partial.tar.gz -C /home/runner/work/node/node/node
-          echo "=== Restored build tree ==="
-          ls /home/runner/work/node/node/node/out/Release/ | head -20
+          tar -xzf /tmp/node-target-partial.tar.gz -C "$NODE_DIR"
+          echo "=== Restored build tree (target 2) from node-target-partial.tar.gz ==="
+          ls "${NODE_DIR}/out/Release/" | head -20
 
           # Touch all source files to epoch so they appear OLDER than
           # compiled objects — make will then correctly skip recompilation.
           echo "=== Setting source timestamps older than objects ==="
-          find /home/runner/work/node/node/node -not -path "*/out/*" -type f -exec touch -t 197001010000 {} +
+          find "$NODE_DIR" -not -path "*/out/*" -type f -exec touch -t 197001010000 {} +
           echo "Done setting timestamps"
 
       - name: Configure cross-compilation environment
@@ -412,7 +411,7 @@ jobs:
           echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=${CROSS_GCC}" >> $GITHUB_ENV
 
       - name: Build ARM target part 2 (finish)
-        working-directory: /home/runner/work/node/node/node
+        working-directory: ${{ env.NODE_DIR }}
         run: |
           make -j$(($(nproc)+1))
 
@@ -420,7 +419,9 @@ jobs:
         env:
           NODE_VERSION: ${{ needs.build-host-tools.outputs.node_version }}
         run: |
-          NODE_DIR=/home/runner/work/node/node/node
+          echo "Working in $(pwd) and have these files here: "
+          ls -la | head -20
+          
           RELEASE_DIR=/tmp/node-release
           RELEASE_NAME="node-v${NODE_VERSION}-linux-armv7l"
           MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
