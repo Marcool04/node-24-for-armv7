@@ -59,6 +59,15 @@ jobs:
             make \
             git
 
+      - name: Cache Node.js source
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: node
+          key: node-source-v1
+        # To invalidate cache: change key from v1 to v2 (or any new string)
+        # This ensures the next build starts fresh without cached source
+
       - name: Configure cross-compilation environment
         run: |
           rustup target add i686-unknown-linux-gnu
@@ -78,6 +87,7 @@ jobs:
 
       - name: Clone Node.js and checkout release commit
         id: get_version
+        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
           # Use manually entered branch if provided, otherwise fall back to env default
           BRANCH="${{ github.event.inputs.node_branch }}"
@@ -118,6 +128,18 @@ jobs:
           # Preferred over reset --hard since we cloned the branch only to find
           # the commit — we do not need to stay on the branch tip.
           git checkout "$COMMIT_ID"
+          echo "NODE_DIR=$(pwd)" >> $GITHUB_ENV
+
+      - name: Set version from cached source
+        if: steps.cache-source.outputs.cache-hit == 'true'
+        run: |
+          cd "$GITHUB_WORKSPACE/node"
+          COMMIT_MSG=$(git log -1 --format="%s")
+          echo "$COMMIT_MSG"
+          NODE_VERSION=$(echo "$COMMIT_MSG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          echo "Detected Node.js version from cached source: $NODE_VERSION"
+          echo "NODE_VERSION=$NODE_VERSION" >> $GITHUB_ENV
+          echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
           echo "NODE_DIR=$(pwd)" >> $GITHUB_ENV
 
       - name: Patch string-hasher for 32-bit host build
@@ -271,6 +293,15 @@ jobs:
             pkg-config \
             libc6-dev \
             make
+
+      - name: Cache Node.js source
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: node
+          key: node-source-v1
+        # To invalidate cache: change key from v1 to v2 (or any new string)
+        # This ensures the next build starts fresh without cached source
 
       - name: Download host build artifact
         uses: actions/download-artifact@v4
