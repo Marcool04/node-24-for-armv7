@@ -468,10 +468,9 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         with:
           tag_name: v${{ needs.build-host-tools.outputs.node_version }}-armv7l
           name: "Node v${{ needs.build-host-tools.outputs.node_version }} - armv7l"
           files: release-artifacts/node-v${{ needs.build-host-tools.outputs.node_version }}-linux-armv7l.tar.gz
+          token: ${{ secrets.PAT_TOKEN }}
 
