@@ -462,9 +462,10 @@ jobs:
           ls -la "$RELEASE_DIR/v${NODE_VERSION}/bin/"
 
           mkdir -p "$GITHUB_WORKSPACE/release-artifacts"
-          echo "Now compressing \"$RELEASE_DIR/v${NODE_VERSION}/\" into \"$GITHUB_WORKSPACE/release-artifacts/$RELEASE_NAME.tar.gz\""
+          cd "$RELEASE_DIR"
+          echo "Now compressing \"v${NODE_VERSION}/\" into \"$GITHUB_WORKSPACE/release-artifacts/$RELEASE_NAME.tar.gz\""
           tar -czf "$GITHUB_WORKSPACE/release-artifacts/$RELEASE_NAME.tar.gz" \
-            "$RELEASE_DIR/v${NODE_VERSION}/"
+            "v${NODE_VERSION}/"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
